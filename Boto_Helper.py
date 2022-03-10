@@ -20,12 +20,16 @@ all_mm = ["ALL", "A"]
 # welcome/main menu/etc messages ---------------------------------------------------------------------------------------
 
 welcome_msg = """
-                <<<<^^^^^^^^^^^^^^^^^^^^^^^^^^>>>>                
-< < < << <<< <<<<{{{ Welcome to the S3 Helper }}}>>>> >>> >> > > >
-                <<<<==========================>>>>     
+|<  < < << <<< <<<< <<<<< <<<<<<{{ {  Welcome to the AWS  } }}>>>>>> >>>>> >>>> >>> >> > >  >|
+|   ██████╗  ██████╗ ████████╗ ██████╗     ██╗  ██╗███████╗██╗     ██████╗ ███████╗██████╗   |   
+|   ██╔══██╗██╔═══██╗╚══██╔══╝██╔═══██╗    ██║  ██║██╔════╝██║     ██╔══██╗██╔════╝██╔══██╗  |   
+|   ██████╔╝██║   ██║   ██║   ██║   ██║3   ███████║█████╗  ██║     ██████╔╝█████╗  ██████╔╝  |   
+|   ██╔══██╗██║   ██║   ██║   ██║   ██║    ██╔══██║██╔══╝  ██║     ██╔═══╝ ██╔══╝  ██╔══██╗  |   
+|   ██████╔╝╚██████╔╝   ██║   ╚██████╔╝    ██║  ██║███████╗███████╗██║     ███████╗██║  ██║  |   
+|   ╚═════╝  ╚═════╝    ╚═╝    ╚═════╝     ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝     ╚══════╝╚═╝  ╚═╝  |
+|<<<================{==={{=={{{={{={ by Zachary Smallwood }=}}=}}}==}}===}================>>>|
 
-
- *Make a selection from the menu by typing it and pressing enter* 
+             *Make a selection from the menu by typing it and pressing enter* 
 
  """
 
@@ -99,6 +103,10 @@ bad_file_path_msg = """
 Oops looks like that didn't work, press ENTER to try again or type QUIT to quit:
 """
 
+bad_bucket_item_del_msg = """Something may have went wrong with your bucket deletions... returning to the main menu."""
+
+empty_bucket_warning = """                    (one or more of your buckets may not be empty)"""
+
 
 # Funcs ----------------------------------------------------------------------------------------------------------------
 
@@ -147,12 +155,13 @@ def delete_bucket_func():
     s3 = boto3.client('s3')
     response = s3.list_buckets()  # getting info on the buckets
     print("A bucket may only be deleted when empty.\nThese are your current buckets:\n")  # Output the bucket names
-    bucket_name_list = {}
+    bucket_name_dict = {}
     bucket_number_list = []
     bucket_number = 0
+    no_itm_bucket_list = []
     for bucket in response["Buckets"]:
         bucket_number += 1
-        bucket_name_list[bucket_number] = bucket["Name"]
+        bucket_name_dict[bucket_number] = bucket["Name"]
         print(f'  {bucket_number}. {bucket["Name"]}')
     print(f'  ({len(response["Buckets"])} Total buckets)' + delete_bucket_selection)
     while True:
@@ -163,35 +172,72 @@ def delete_bucket_func():
             break
     print("\n~Are you sure you would like to delete the following buckets? :\n")
     for bucket_numbers in bucket_number_list:
-        print("  " + str(bucket_name_list[bucket_numbers]))
+        print("  " + str(bucket_name_dict[bucket_numbers]))
     while True:
         y_or_n = input("\n").upper()
         quit_checker(y_or_n)
         if y_or_n in yes_mm:
             try:
+                empty_bucket_count = 0
+                buckets_w_items_dict = {}
                 s3 = boto3.resource('s3')
                 for bucket_numbers in bucket_number_list:
-                    del_name = str(bucket_name_list[bucket_numbers])
-                    print(del_name)
-                    bucket = s3.Bucket(del_name)
-                    bucket.delete()
-                y_or_n = input(delete_bucket_completed_msg).upper()
-                while True:
-                    quit_checker(y_or_n)
-                    if y_or_n in yes_mm:
-                        return True
-                    elif y_or_n in no_mm:
+                    my_bucket = s3.Bucket(bucket_name_dict[bucket_numbers])
+                    item_name_list = []
+                    for my_bucket_object in my_bucket.objects.all():
+                        item_name_list.append(my_bucket_object.key)
+                    if not len(item_name_list):
+                        empty_bucket_count += 1
+                        no_itm_bucket_list.append(bucket_name_dict[bucket_numbers])
+                        continue
+                    buckets_w_items_dict[bucket_name_dict[bucket_numbers]] = item_name_list
+                if buckets_w_items_dict:
+                    print("looks like " + str(len(buckets_w_items_dict)) + " of your bucket selections have items in them and cannot be deleted as is.\n")
+                    for non_empty_bucket in buckets_w_items_dict:
+                        print(f"Bucket {non_empty_bucket} contains {len(buckets_w_items_dict[non_empty_bucket])} items. These are the items:")
+                        for item in buckets_w_items_dict[non_empty_bucket]:
+                            print("  ~ ", item)
+                        y_or_n = input("\nIf you would like to delete all the items in this bucket type YES ALL and press enter, or type NO to return to the main menu\n").upper()
+                        while True:
+                            quit_checker(y_or_n)
+                            if y_or_n in "YES ALL":
+                                for item in buckets_w_items_dict[non_empty_bucket]:
+                                    try:
+                                        s3.Object(non_empty_bucket, item).delete()
+                                    except:
+                                        print(bad_bucket_item_del_msg)
+                                        return False
+                                no_itm_bucket_list.append(non_empty_bucket)
+                                print(f"Successfully removed {len(buckets_w_items_dict[non_empty_bucket])} items from Bucket {non_empty_bucket}!\n")
+                                break
+                            elif y_or_n in no_mm:
+                                return False
+                            else:
+                                y_or_n = input("Invalid input, please try again.\n").upper()
+                if no_itm_bucket_list:
+                    try:
+                        s3 = boto3.resource('s3')
+                        for bucket_name in no_itm_bucket_list:
+                            bucket = s3.Bucket(bucket_name)
+                            bucket.delete()
+                    except:
+                        print(bad_bucket_item_del_msg)
                         return False
-                    else:
-                        y_or_n = input("Invalid input, please try again.\n").upper()
             except:
-                print("""Something may have went wrong with your bucket deletions... returning to the main menu.
-                (one or more of your buckets may not be empty)""")
+                print(bad_bucket_item_del_msg)
                 return False
-
+            y_or_n = input(delete_bucket_completed_msg).upper()
+            while True:
+                quit_checker(y_or_n)
+                if y_or_n in yes_mm:
+                    return True
+                elif y_or_n in no_mm:
+                    return False
+                else:
+                    y_or_n = input("Invalid input, please try again.\n").upper()
         elif y_or_n in no_mm:
             print("\nBucket deletion canceled, returning to main menu.")
-            return
+            return False
         else:
             print("Invalid input, please try again.\n")
 
@@ -250,7 +296,7 @@ def upload_item_func():
         print("Something may have went wrong with your item upload... returning to the main menu.")
         return False
     data.close()  # closing the data
-    y_or_n = input(upload_success_msg)
+    y_or_n = input(upload_success_msg).upper()
     while True:
         quit_checker(y_or_n)
         if y_or_n in yes_mm:
@@ -258,7 +304,7 @@ def upload_item_func():
         elif y_or_n in no_mm:
             return False
         else:
-            y_or_n = input("Invalid input, please try again.\n")
+            y_or_n = input("Invalid input, please try again.\n").upper
 
 
 def delete_item_func():
@@ -334,7 +380,7 @@ def delete_item_func():
 
 
 def quit_checker(user_input_to_check):
-    if user_input_to_check in quit_mm:
+    if user_input_to_check.upper() in quit_mm:
         sys.exit("Thanks! quitting.. now")
     return
 
@@ -368,7 +414,7 @@ def main_menu():
                     display_buckets_func()
             continue
         elif mm_input in quit_mm:
-            quit()
+            sys.exit("Thanks! quitting.. now")
         else:
             print("Invalid input, please try again.\n")
 
